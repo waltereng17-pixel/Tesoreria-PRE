@@ -258,7 +258,7 @@ const CAT_COLOR = {"Facturas":2,"Leche y chocolatada":1,"Bebidas":3,"Comidas":4,
   "Ofrenda iglesia":1,"Ofrendas sueltas":7,"Sobrante de eventos":3,"Cambio de moneda":6};
 const kCat = c => "var(--c" + (CAT_COLOR[c] ?? 0) + ")";
 const CAJA_COLOR = {gen:1, usd:6, rmp:3, ref:4};
-const kCaja = id => "var(--c" + (CAJA_COLOR[id] ?? 0) + ")";
+const kCaja = id => { if (CAJA_COLOR[id] != null) return "var(--c" + CAJA_COLOR[id] + ")"; const i = S.cajas.findIndex(c => c.id === id); return "var(--c" + [2,5,7,8,3,4][Math.max(0,i) % 6] + ")"; };
 const inicial = s => esc((s||"?").trim()[0].toUpperCase());
 
 function efectos(m){
@@ -328,7 +328,7 @@ function header(){
     : '<button class="pill" id="entrar">Entrar como tesorero</button>';
   return '<div class="band"><div class="gut"><div class="band-top"><div><div class="eyebrow">Grupo PRE · reuniones de los sábados</div><h1>Tesorería PRE</h1>'
     + '<p>Libro de caja'+(ult ? ' · último movimiento el '+fCorta(ult) : '')+'</p></div><div class="acct">'+acct+'</div></div>'
-    + '<nav class="tabs" role="tablist">' + TABS.map(([k,t,c]) => '<button role="tab" data-tab="'+k+'" aria-selected="'+(UI.tab===k)+'" style="--k:var(--c'+c+')"><i></i>'+t+'</button>').join("") + '</nav></div></div>';
+    + '<nav class="tabs" role="tablist">' + TABS.map(([k,t,c]) => '<button role="tab" data-tab="'+k+'" aria-selected="'+(UI.tab===k)+'" style="--k:var(--c'+c+')"><i></i>'+(k === "copias" ? (canWrite ? "Ajustes y copias" : "Descargas") : t)+'</button>').join("") + '</nav></div></div>';
 }
 function secHead(titulo, color, letra, extra){ return '<div class="sec-head"><h2><span class="ico" style="background:var(--c'+color+')">'+letra+'</span>'+titulo+'</h2>'+(extra||'')+'</div>'; }
 
@@ -384,9 +384,9 @@ function vistaInicio(){
   const dias3 = new Set(ult3.map(m=>m.f)).size;
   const prom = dias3 ? Math.round(suma(ult3)/dias3) : 0;
   const gen = caja("gen");
-  let h = '<section class="sec">' + secHead("Cajas", 1, "$") + '<div class="cajas">'
+  let h = '<section class="sec">' + secHead("Cajas", 1, "$", canWrite ? '<button class="btn small" id="goCajas">Editar cajas</button>' : '') + '<div class="cajas">'
     + '<div class="tile main" style="--k:'+kCaja("gen")+'"><span class="lab"><span class="ico">$</span>'+esc(gen.nombre)+'</span><span class="val num">'+fmt(sal.gen,"ARS")+'</span><small>Efectivo disponible para los sábados</small></div>'
-    + S.cajas.filter(c => c.id !== "gen").map(c => '<div class="tile" style="--k:'+kCaja(c.id)+'"><span class="lab"><span class="ico">'+(c.moneda==="USD"?"U":inicial(c.nombre))+'</span>'+esc(c.nombre)+'</span><span class="val num">'+fmt(sal[c.id]||0,c.moneda)+'</span></div>').join("")
+    + S.cajas.filter(c => c.id !== "gen" && !c.oculta).map(c => '<div class="tile" style="--k:'+kCaja(c.id)+'"><span class="lab"><span class="ico">'+(c.moneda==="USD"?"U":inicial(c.nombre))+'</span>'+esc(c.nombre)+'</span><span class="val num">'+fmt(sal[c.id]||0,c.moneda)+'</span></div>').join("")
     + '</div></section>';
   if (canWrite){
     h += '<section class="sec">' + secHead("Cargar", 2, "+", '<span class="eyebrow">un toque y confirmás el importe</span>');
@@ -409,7 +409,7 @@ function opts(arr, sel){ return arr.map(v => { const [val,txt] = Array.isArray(v
 function listaUnica(campo){ return [...new Set(S.movs.map(m => m[campo]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"es")); }
 
 function vistaForm(){
-  const f = form, cajasOpt = S.cajas.map(c => [c.id, c.nombre]);
+  const f = form, cajasOpt = S.cajas.filter(c => !c.oculta || c.id === f.caja || c.id === f.caja2).map(c => [c.id, c.nombre]);
   const cats = f.t === "in" ? S.cats.in : S.cats.out;
   let h = '<form class="form" id="mform" novalidate><div class="sec-head"><h2>'+(f.id ? "Editar movimiento" : "Nuevo movimiento")+'</h2>'
     + '<div class="seg" role="group" aria-label="Tipo">' + [["out","Gasto"],["in","Ingreso"],["cambio","Cambio de moneda"]].map(([k,t]) => '<button type="button" data-tipo="'+k+'" aria-pressed="'+(f.t===k)+'">'+t+'</button>').join("") + (f.t==="ajuste"?'<button type="button" aria-pressed="true">Ajuste</button>':'') + '</div></div>';
@@ -666,6 +666,17 @@ function vistaCopias(){
       + (confirmCopia === c.id ? '<div class="nota confirm">Se reemplaza el libro actual por esta copia. <button class="btn small danger" data-copiasi="'+esc(c.id)+'">Sí, volver</button><button class="btn small" data-copiano="1">Cancelar</button></div>' : '') + '</div>').join("") + '</div>';
   h += '<label class="f">Restaurar desde un archivo .json<input type="file" id="restFile" accept=".json,application/json"></label>'
     + (restoreText ? '<div class="confirm">La copia tiene '+restoreText.movs.length+' movimientos. Va a reemplazar los '+S.movs.length+' actuales. <button class="btn small danger" id="restSi">Reemplazar</button><button class="btn small" id="restNo">Cancelar</button></div>' : '') + '</div>';
+  const salC = saldos();
+  h += '<div class="card" id="cajasPanel"><h3 style="font-size:15px">Cajas y fondos</h3><p class="note">Cambiá el nombre de una caja, fijá su saldo real o ocultala de la pantalla de inicio. Al fijar un saldo se registra un ajuste con la fecha de hoy, así queda constancia en Movimientos. Una caja con movimientos no se puede borrar: se oculta.</p>'
+    + S.cajas.map((c,i) => { const usada = S.movs.some(m => m.caja === c.id || m.caja2 === c.id);
+      return '<div class="atj" style="--k:'+kCaja(c.id)+'"><label class="f"><span style="display:flex;align-items:center;gap:6px"><i style="width:10px;height:10px;border-radius:3px;background:var(--k);display:inline-block"></i>Nombre · '+(c.moneda === "USD" ? "dólares" : "pesos")+(c.oculta ? " · oculta" : "")+'</span><input id="cj-n-'+i+'" value="'+esc(c.nombre)+'"></label>'
+        + '<label class="f">Saldo actual<input value="'+fmt(salC[c.id]||0, c.moneda)+'" disabled></label>'
+        + '<label class="f">Fijar saldo en<input id="cj-s-'+i+'" inputmode="decimal" placeholder="sin cambios" autocomplete="off"></label>'
+        + '<div class="actions">' + (c.id === "gen" ? '' : '<button class="btn small" data-cjhide="'+i+'">'+(c.oculta ? "Mostrar" : "Ocultar")+'</button>') + (!usada && c.id !== "gen" ? '<button class="btn small danger" data-cjdel="'+i+'">Borrar</button>' : '') + '</div></div>'; }).join("")
+    + '<div class="actions"><button class="btn primary" id="cjSave">Guardar cajas</button></div>'
+    + '<div class="atj" style="border-top:1px solid var(--line-2);padding-top:12px"><label class="f">Nueva caja<input id="cj-new-n" placeholder="Ej.: Plazo fijo" autocomplete="off"></label>'
+    + '<label class="f">Moneda<select id="cj-new-m"><option value="ARS">Pesos</option><option value="USD">Dólares</option></select></label>'
+    + '<label class="f">Saldo inicial<input id="cj-new-s" inputmode="decimal" placeholder="0" autocomplete="off"></label><button class="btn" id="cjAdd">Agregar caja</button></div></div>';
   h += '<div class="card"><h3 style="font-size:15px">Botones de carga rápida</h3><p class="note">Ajustá el importe habitual cuando cambien los precios. Igual se puede corregir al cargar.</p>'
     + S.atajos.map((a,i) => '<div class="atj"><label class="f">Nombre<input id="at-n-'+i+'" value="'+esc(a.nombre)+'"></label><label class="f">Importe<input id="at-m-'+i+'" inputmode="decimal" value="'+a.m+'"></label>'
       + '<label class="f">Categoría<select id="at-c-'+i+'">'+opts(a.t==="in"?S.cats.in:S.cats.out, a.cat)+'</select></label><button class="btn small danger" data-atdel="'+i+'">Quitar</button></div>').join("")
@@ -761,6 +772,24 @@ $root.addEventListener("click", async e => {
   if (t.id === "iDelNo"){ iform.confirm = false; render(); return; }
   if (t.id === "iDelSi"){ const a = S.acts.find(x => x.id === iform.act); a.items = a.items.filter(x => x.id !== iform.id); toast("Borrado: " + iform.d); iform = null; cambio(); return; }
   if (t.id === "dlActs") return descargarActs();
+  if (t.id === "goCajas"){ UI.tab = "copias"; form = null; guardarUI(); render(); const el = document.getElementById("cajasPanel"); if (el) el.scrollIntoView({block:"start"}); return; }
+  if (t.id === "cjSave"){
+    const sal = saldos(); let n = 0;
+    S.cajas.forEach((c,i) => {
+      const ne = document.getElementById("cj-n-"+i), se = document.getElementById("cj-s-"+i);
+      if (ne && ne.value.trim()) c.nombre = ne.value.trim();
+      if (se && se.value.trim() !== ""){ const v = num(se.value); if (isFinite(v)){ const diff = Math.round((v - (sal[c.id]||0))*100)/100;
+        if (diff){ S.movs.push({id: nuevoId(), f: hoy(), d: "Ajuste de saldo: " + c.nombre, t: "ajuste", m: diff, caja: c.id, cat: "Ajuste", nota: "Saldo fijado en " + fmt(v, c.moneda)}); n++; } } }
+    });
+    toast(n ? "Cajas guardadas · " + n + (n === 1 ? " ajuste registrado" : " ajustes registrados") : "Cajas guardadas"); cambio(); return; }
+  if (t.dataset.cjhide){ const c = S.cajas[+t.dataset.cjhide]; c.oculta = !c.oculta; toast((c.oculta ? "Oculta: " : "Visible: ") + c.nombre); cambio(); return; }
+  if (t.dataset.cjdel){ const c = S.cajas.splice(+t.dataset.cjdel, 1)[0]; toast("Borrada: " + c.nombre); cambio(); return; }
+  if (t.id === "cjAdd"){
+    const nombre = (document.getElementById("cj-new-n").value || "").trim(), moneda = document.getElementById("cj-new-m").value, s = num(document.getElementById("cj-new-s").value);
+    if (!nombre){ toast("Escribí el nombre de la caja nueva"); return; }
+    const c = {id: "c" + nuevoId().slice(1), nombre, moneda}; S.cajas.push(c);
+    if (s) S.movs.push({id: nuevoId(), f: hoy(), d: "Saldo inicial: " + nombre, t: "ajuste", m: s, caja: c.id, cat: "Saldo inicial"});
+    toast("Caja agregada: " + nombre); cambio(); return; }
   if (t.dataset.atajo){ const a = S.atajos[+t.dataset.atajo]; abrirForm({t:a.t, d:a.d || a.nombre, cat:a.cat, m:a.m}); return; }
   if (t.dataset.nuevo){ abrirForm({t:t.dataset.nuevo, cat: t.dataset.nuevo === "in" ? S.cats.in[0] : S.cats.out[0]}); return; }
   if (t.dataset.edit && canWrite){ const m = S.movs.find(x => x.id === t.dataset.edit); if (m){ if (UI.tab !== "inicio") UI.tab = "movs"; abrirForm(Object.assign({}, m, {focus:false})); window.scrollTo(0,0); } return; }
